@@ -1,0 +1,114 @@
+name: build
+
+# Every push and pull request builds, tests and packages the three setups; a vX.Y.Z tag also publishes them as a GitHub release.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - run: dotnet build -c Release -warnaserror
+      - run: dotnet test -c Release --no-build
+      - name: Scripts are ASCII and parse
+        shell: powershell
+        run: |
+          $files = @(Get-ChildItem scripts\*.ps1, installer\*.ps1, installer\windowfit.iss)
+          $nonAscii = @($files | Select-String -Pattern '[^\x00-\x7F]')
+          if ($nonAscii) { $nonAscii; throw 'non-ASCII characters in scripts' }
+          foreach ($file in $files | Where-Object Extension -eq '.ps1') {
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
+              if ($errors) { $errors; throw "$($file.Name) does not parse" }
+          }
+      - name: Publish and build the setups
+        shell: pwsh
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          $version = if ($env:REF -match '^refs/tags/v(\d+\.\d+\.\d+)$') { $Matches[1] } else { '0.0.0' }
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
+          foreach ($arch in 'x64', 'x86', 'arm64') {
+              dotnet publish src\WindowFit\WindowFit.csproj -c Release -r "win-$arch" --self-contained true -p:Version=$version -o "out\$arch" --nologo
+              if ($LASTEXITCODE -ne 0) { throw "dotnet publish win-$arch failed ($LASTEXITCODE)" }
+              & $iscc /Q "/DArch=$arch" "/DAppVersion=$version" "/DSourceExe=$PWD\out\$arch\windowfit.exe" installer\windowfit.iss
+              if ($LASTEXITCODE -ne 0) { throw "ISCC $arch failed ($LASTEXITCODE)" }
+              $name = "windowfit-$version-setup-$arch.exe"
+              $hash = (Get-FileHash "installer\Output\$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+              Set-Content -Path "installer\Output\$name.sha256" -Value "$hash  $name" -Encoding ascii
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: setups
+          path: installer/Output/
+          if-no-files-found: error
+      # The runner is a throwaway admin VM: install for all users, read the state back, uninstall.
+      - name: Install, check and uninstall the x64 setup
+        shell: powershell
+        run: |
+          $setup = Join-Path $PWD "installer\Output\windowfit-$env:VERSION-setup-x64.exe"
+          # A \windowfit folder pre-created with full control for Authenticated Users, as a standard user could leave it.
+          $scheduler = New-Object -ComObject Schedule.Service
+          $scheduler.Connect()
+          [void]$scheduler.GetFolder('\').CreateFolder('windowfit', 'D:(A;;FA;;;AU)')
+          $p = Start-Process $setup '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SCOPE=all /LOG=setup.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 40; throw "setup exited $($p.ExitCode)" }
+          $writeBits = 0x40000000 -bor 0x10000000 -bor 0x2 -bor 0x4 -bor 0x10 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000
+          $folder = $scheduler.GetFolder('\windowfit')
+          foreach ($sd in @($folder.GetSecurityDescriptor(4), $folder.GetTask('windowfit').GetSecurityDescriptor(4))) {
+              "descriptor: $sd"
+              foreach ($ace in (New-Object Security.AccessControl.RawSecurityDescriptor($sd)).DiscretionaryAcl) {
+                  $trusted = @('S-1-5-18', 'S-1-5-32-544') -contains $ace.SecurityIdentifier.Value
+                  if ($ace.AceType -eq 'AccessAllowed' -and -not $trusted -and ($ace.AccessMask -band $writeBits)) { throw "$($ace.SecurityIdentifier) can write: $sd" }
+              }
+          }
+          $status = & powershell -NoProfile -ExecutionPolicy Bypass -File 'C:\Program Files\windowfit\status.ps1'
+          $status
+          # No one signs in on the runner, so only the install and the task are required.
+          if ($status -match '^FAIL (installed exe|logon task|task )') { throw 'installed state is wrong' }
+          # status.ps1 exits 1 on the process checks, and the step's result is the last exit code.
+          $global:LASTEXITCODE = 0
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\windowfit.lnk")) { throw 'Start menu entry missing' }
+          Start-Process 'C:\Program Files\windowfit\unins000.exe' '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
+          # The uninstaller hands over to a copy of itself and returns at once.
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Test-Path 'C:\Program Files\windowfit') -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          $left = @()
+          if (Test-Path 'C:\Program Files\windowfit') { $left += 'install folder' }
+          if (Get-ScheduledTask -TaskPath '\windowfit\' -ErrorAction SilentlyContinue) { $left += 'task' }
+          if (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\windowfit.lnk") { $left += 'Start menu entry' }
+          if (Get-Process windowfit -ErrorAction SilentlyContinue) { $left += 'process' }
+          if ($left) { throw "left after uninstall: $($left -join ', ')" }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: setups
+          path: setups
+      - name: Create the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+$') { throw "tag $env:TAG is not vX.Y.Z" }
+          $files = @(Get-ChildItem setups -File | ForEach-Object FullName)
+          if ($files.Count -ne 6) { throw "expected 6 release files, found $($files.Count)" }
+          gh release create $env:TAG @files --repo $env:GITHUB_REPOSITORY --title $env:TAG --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed ($LASTEXITCODE)" }

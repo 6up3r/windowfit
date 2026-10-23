@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\WindowFit.Core\WindowFit.Core.csproj" />
+    <EmbeddedResource Include="Assets\windowfit.ico" LogicalName="windowfit.ico" />
+    <EmbeddedResource Include="Assets\windowfit-paused.ico" LogicalName="windowfit-paused.ico" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>windowfit</AssemblyName>
+    <ApplicationIcon>Assets\windowfit.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- The process runs elevated with the user's environment: DOTNET_STARTUP_HOOKS must not load code into it. -->
+    <StartupHookSupport>false</StartupHookSupport>
+    <!-- A publish is one compressed exe. IncludeNativeLibrariesForSelfExtract stays off: an elevated process must not extract code into a user-writable temp folder. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+</Project>
