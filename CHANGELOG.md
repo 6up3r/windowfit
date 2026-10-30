@@ -4,7 +4,7 @@ All notable changes to windowfit are listed here, newest first. The format follo
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.4] - 2026-10-30
 
 ### Fixed
 
@@ -37,5 +37,6 @@ All notable changes to windowfit are listed here, newest first. The format follo
 - An elevated logon task, so elevated windows can be moved too.
 - A setup for x64, x86 and arm64, installing for the signed-in user or for all users.
 
+[1.0.4]: https://github.com/6up3r/windowfit/releases/tag/v1.0.4
 [1.0.3]: https://github.com/6up3r/windowfit/releases/tag/v1.0.3
 [1.0.0]: https://github.com/6up3r/windowfit/releases/tag/v1.0.0
