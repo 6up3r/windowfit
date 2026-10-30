@@ -62,4 +62,17 @@ public class ChordTests
     [Fact]
     public void NonArrowKey_IsNotCaught() =>
         Assert.Null(Actions.Match(VkA, new Modifiers(Win: true, Ctrl: false, Shift: false, Alt: false)));
+
+    [Theory]
+    [InlineData("FitHalfLeft", Tile.Left)]
+    [InlineData("FillHalfRight", Tile.Right)]
+    [InlineData("FitHalfCenter", Tile.Center)]
+    [InlineData("FillScreen", Tile.Screen)]
+    [InlineData("FitScreen", Tile.Screen)]
+    [InlineData("FitQuarterTopRight", Tile.TopRight)]
+    [InlineData("FillQuarterBottomLeft", Tile.BottomLeft)]
+    public void Action_CarriesItsTile(string name, Tile tile) => Assert.Equal(tile, Actions.ByName(name).Tile);
+
+    [Fact]
+    public void CenterOnly_HasNoTile() => Assert.Null(Actions.ByName("CenterOnly").Tile);
 }

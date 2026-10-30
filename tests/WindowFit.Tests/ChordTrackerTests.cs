@@ -17,6 +17,19 @@ public class ChordTrackerTests
     }
 
     [Fact]
+    public void WinPress_GrowsPerWinPressNotPerRepeat()
+    {
+        var t = new ChordTracker();
+        t.KeyDown(VkLWin, None);
+        Assert.Equal(1, t.WinPress);
+        t.KeyDown(VkLWin, None);
+        Assert.Equal(1, t.WinPress);
+        t.KeyUp(VkLWin);
+        t.KeyDown(VkLWin, None);
+        Assert.Equal(2, t.WinPress);
+    }
+
+    [Fact]
     public void PerpendicularArrow_MovesOnToTheQuarter()
     {
         var t = new ChordTracker();

@@ -5,12 +5,13 @@ using static WindowFit.Native;
 
 namespace WindowFit;
 
-/// <summary>Applies an action to the foreground window on the monitor it sits on.</summary>
+/// <summary>Applies an action to the foreground window on the monitor it sits on, and reports it to the groups.</summary>
 internal static class WindowMover
 {
     private static readonly HashSet<string> ShellClasses = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
 
-    public static void Apply(WindowAction action)
+    /// <param name="groups">Null while the tray's Groups is off.</param>
+    public static void Apply(WindowAction action, int chord, WindowGroups? groups)
     {
         var hwnd = GetForegroundWindow();
         var state = ReadState(hwnd);
@@ -46,6 +47,53 @@ internal static class WindowMover
         {
             Log.Write($"{action.Name}: target {target} landed at {actual} {Describe(hwnd)}");
         }
+        // A window the groups cannot follow (topmost: placing it beneath another would end that) leaves them.
+        var placed = Probe(hwnd);
+        groups?.Moved(hwnd, placed is null ? null : action.Tile, placed ?? default, chord, Probe);
+    }
+
+    /// <summary>
+    /// A window as the groups see it: null when it is gone, hidden, topmost or cloaked by itself; minimized without a
+    /// frame; otherwise its monitor, visible frame, virtual desktop and process. The shell cloaks the windows of the
+    /// desktops not shown, so that cloak is left to the desktop id, compared with the one recorded at placement.
+    /// </summary>
+    public static WindowProbe? Probe(IntPtr hwnd)
+    {
+        if (!IsWindow(hwnd) || !IsWindowVisible(hwnd) || IsTopmost(hwnd))
+        {
+            return null;
+        }
+        GetWindowThreadProcessId(hwnd, out var process);
+        if (IsIconic(hwnd))
+        {
+            return new WindowProbe(MonitorOf(hwnd), default, Minimized: true, default, process);
+        }
+        if ((CloakFlags(hwnd) & ~DWM_CLOAKED_SHELL) != 0)
+        {
+            return null;
+        }
+        return new WindowProbe(MonitorOf(hwnd), Frame(hwnd), Minimized: false, DesktopOf(hwnd), process);
+    }
+
+    public static IntPtr MonitorOf(IntPtr hwnd) => MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+
+    private static bool IsTopmost(IntPtr hwnd) => ((long)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+    [ThreadStatic]
+    private static IVirtualDesktopManager? _desktops;
+
+    // Unknown is Guid.Empty on every read: a failing shell must not break the groups.
+    private static Guid DesktopOf(IntPtr hwnd)
+    {
+        try
+        {
+            _desktops ??= (IVirtualDesktopManager)Activator.CreateInstance(Type.GetTypeFromCLSID(CLSID_VirtualDesktopManager)!)!;
+            return _desktops.GetWindowDesktopId(hwnd, out var desktop) == 0 ? desktop : Guid.Empty;
+        }
+        catch (Exception e) when (e is COMException or InvalidCastException)
+        {
+            return Guid.Empty;
+        }
     }
 
     private static WindowState? ReadState(IntPtr hwnd)
@@ -80,8 +128,10 @@ internal static class WindowMover
         return ToRect(r);
     }
 
-    private static bool IsCloaked(IntPtr hwnd) =>
-        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0;
+    private static bool IsCloaked(IntPtr hwnd) => CloakFlags(hwnd) != 0;
+
+    private static int CloakFlags(IntPtr hwnd) =>
+        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 ? cloaked : 0;
 
     private static Rect WorkArea(IntPtr hwnd) => ToRect(MonitorInfo(hwnd).rcWork);
 

@@ -7,9 +7,10 @@ public readonly record struct Modifiers(bool Win, bool Ctrl, bool Shift, bool Al
 
 /// <summary>
 /// A Win+arrow action: Plan returns the visible target rect, or null to leave the window alone.
-/// A quarter also names PairKey, the perpendicular arrow held with VirtualKey in either order.
+/// A quarter also names PairKey, the perpendicular arrow held with VirtualKey in either order; Tile is the tile a
+/// fit or fill places the window in, null for CenterOnly.
 /// </summary>
-public sealed record WindowAction(string Name, int VirtualKey, bool Ctrl, Func<Rect, WindowState?, Rect?> Plan, int? PairKey = null);
+public sealed record WindowAction(string Name, int VirtualKey, bool Ctrl, Func<Rect, WindowState?, Rect?> Plan, int? PairKey = null, Tile? Tile = null);
 
 public static class Actions
 {
@@ -55,7 +56,7 @@ public static class Actions
 
     private static WindowAction FitTile(string name, int vk, bool ctrl, Tile tile, double gap, double? side = null, int? pair = null) =>
         new(name, vk, ctrl, (area, win) =>
-            win is { Normal: true, Movable: true, Resizable: true } ? Geometry.Fit(area, tile, gap, side) : null, pair);
+            win is { Normal: true, Movable: true, Resizable: true } ? Geometry.Fit(area, tile, gap, side) : null, pair, tile);
 
     private static Rect? CentreOnly(Rect area, WindowState? win) =>
         win is { Normal: true, Movable: true } ? Geometry.Centre(area, win.Frame.Width, win.Frame.Height) : null;

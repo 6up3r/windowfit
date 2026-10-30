@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/WindowFit.Core/WindowFit.Core.csproj" />
     <Project Path="src/WindowFit/WindowFit.csproj" />
+    <Project Path="src/WindowFit.Signer/WindowFit.Signer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WindowFit.Tests/WindowFit.Tests.csproj" />

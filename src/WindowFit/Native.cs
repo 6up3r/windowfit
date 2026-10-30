@@ -13,13 +13,22 @@ internal static class Native
 
     public const int GWL_STYLE = -16, GWL_EXSTYLE = -20;
     public const long WS_CHILD = 0x40000000, WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
-    public const long WS_EX_TOOLWINDOW = 0x00000080;
-    public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;
+    public const long WS_EX_TOOLWINDOW = 0x00000080, WS_EX_TOPMOST = 0x00000008;
+    public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14, DWM_CLOAKED_SHELL = 0x2;
     public const int SW_RESTORE = 9;
-    public const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_NOOWNERZORDER = 0x0200;
+    public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_NOOWNERZORDER = 0x0200;
+    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003, EVENT_SYSTEM_MINIMIZESTART = 0x0016;
+    public const uint EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_HIDE = 0x8003;
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000, WINEVENT_SKIPOWNPROCESS = 0x0002;
+    public const int OBJID_WINDOW = 0, CHILDID_SELF = 0;
+    public const uint GW_OWNER = 4;
     public const uint MONITOR_DEFAULTTONEAREST = 2;
 
     public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    public delegate void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint idEventThread, uint dwmsEventTime);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public UIntPtr dwExtraInfo; }
@@ -68,6 +77,25 @@ internal static class Native
     public static extern bool PostThreadMessage(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
+    public static extern bool TranslateMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc, WinEventProc pfnWinEventProc,
+        uint idProcess, uint idThread, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -81,6 +109,9 @@ internal static class Native
 
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     public static extern bool IsIconic(IntPtr hWnd);
@@ -122,4 +153,37 @@ internal static class Native
 
     [DllImport("user32.dll")]
     public static extern bool AreDpiAwarenessContextsEqual(IntPtr dpiContextA, IntPtr dpiContextB);
+
+    // CLSID_VirtualDesktopManager and IID_IVirtualDesktopManager, from the Windows SDK's ShObjIdl.idl / ShObjIdl_core.h.
+    public static readonly Guid CLSID_VirtualDesktopManager = new("aa509086-5ca9-4c25-8f95-589d3c07b48a");
+
+    [ComImport, Guid("a5cd92ff-29be-454c-8d04-d82879fb3f1b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IVirtualDesktopManager
+    {
+        // Declared for its vtable slot: GetWindowDesktopId comes second.
+        [PreserveSig]
+        int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, [MarshalAs(UnmanagedType.Bool)] out bool onCurrentDesktop);
+
+        [PreserveSig]
+        int GetWindowDesktopId(IntPtr topLevelWindow, out Guid desktopId);
+    }
+
+    public static readonly IntPtr HKEY_CURRENT_USER = unchecked((int)0x80000001);
+    public const uint REG_OPTION_OPEN_LINK = 0x8, KEY_QUERY_VALUE = 0x1, KEY_SET_VALUE = 0x2, REG_SZ = 1, REG_DWORD = 4;
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    public static extern int RegOpenKeyExW(IntPtr hKey, string lpSubKey, uint ulOptions, uint samDesired, out IntPtr phkResult);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    public static extern int RegCreateKeyExW(IntPtr hKey, string lpSubKey, uint reserved, string? lpClass, uint dwOptions,
+        uint samDesired, IntPtr lpSecurityAttributes, out IntPtr phkResult, out uint lpdwDisposition);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    public static extern int RegQueryValueExW(IntPtr hKey, string lpValueName, IntPtr lpReserved, out uint lpType, byte[]? lpData, ref uint lpcbData);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    public static extern int RegSetValueExW(IntPtr hKey, string lpValueName, uint reserved, uint dwType, byte[] lpData, uint cbData);
+
+    [DllImport("advapi32.dll")]
+    public static extern int RegCloseKey(IntPtr hKey);
 }

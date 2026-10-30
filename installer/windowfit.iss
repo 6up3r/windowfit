@@ -1,4 +1,4 @@
-; windowfit setup: ISCC /DArch=<x64|x86|arm64> /DAppVersion=<X.Y.Z> /DSourceExe=<published windowfit.exe> windowfit.iss
+; windowfit setup: ISCC /DArch=<x64|x86|arm64> /DAppVersion=<X.Y.Z> /DSourceExe=<published windowfit.exe> /DLauncherExe=<built windowfit-launcher.exe> windowfit.iss
 ; Files go to Program Files only, so the exe behind the elevated task stays writable only by Administrators.
 
 #ifndef Arch
@@ -9,6 +9,9 @@
 #endif
 #ifndef SourceExe
   #error Define SourceExe: the published windowfit.exe
+#endif
+#ifndef LauncherExe
+  #error Define LauncherExe: windowfit-launcher.exe built by build-launcher.ps1
 #endif
 #if Arch == "x64"
   #define InstallIn64 "x64os"
@@ -51,7 +54,7 @@ LanguageDetectionMethod=uilanguage
 Compression=lzma2
 SolidCompression=yes
 OutputDir=Output
-OutputBaseFilename=windowfit-{#AppVersion}-setup-{#Arch}
+OutputBaseFilename=windowfit-setup-{#Arch}
 
 [Languages]
 ; English first: an unlisted Windows UI language falls back to it.
@@ -74,6 +77,7 @@ Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#LauncherExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\status.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\windowfit-common.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "session-user.ps1"; Flags: dontcopy
@@ -84,6 +88,10 @@ Name: "{commonprograms}\windowfit"; Filename: "{app}\windowfit.exe"; Parameters:
 
 [Run]
 Filename: "{app}\windowfit.exe"; Parameters: "--start"; Description: "{cm:LaunchNow}"; Flags: postinstall runascurrentuser runhidden nowait; Check: TaskRegistered
+
+[UninstallDelete]
+; What an update left: the downloaded setup and its temporary folder.
+Type: filesandordirs; Name: "{app}\updates"
 
 [Code]
 const
@@ -96,6 +104,7 @@ var
   SessionUserName: String;
   SessionUserSid: String;
   TaskFailed: Boolean;
+  Completed: Boolean;
 
 function NativeArch: String;
 begin
@@ -149,7 +158,7 @@ begin
   Result := NativeArch = '{#Arch}';
   if not Result then
     SuppressibleMsgBox(FmtMessage(CustomMessage('WrongArch'), ['{#Arch}',
-      'windowfit-{#AppVersion}-setup-' + NativeArch + '.exe']), mbError, MB_OK, IDOK);
+      'windowfit-setup-' + NativeArch + '.exe']), mbError, MB_OK, IDOK);
 end;
 
 // A local account reads PCNAME\user; only a domain account keeps its prefix.
@@ -215,6 +224,7 @@ end;
 procedure StopWindowFit;
 begin
   RunHidden(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "{#TaskName}"');
+  RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/IM windowfit-launcher.exe /F');
   RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/IM windowfit.exe /F');
   Sleep(500);
 end;
@@ -229,7 +239,8 @@ function TaskXml: String;
 var
   Trigger, Principal, Runner, Exe: String;
 begin
-  Exe := ExpandConstant('{app}\windowfit.exe');
+  // The launcher starts windowfit.exe without the user's environment, which could load code into an elevated .NET process.
+  Exe := ExpandConstant('{app}\windowfit-launcher.exe');
   if ForAllUsers then
   begin
     Trigger := '';
@@ -322,6 +333,18 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     RegisterTask;
+  if CurStep = ssDone then
+    Completed := True;
+end;
+
+// windowfit exits when it starts its update: a silent setup cancelled or failed starts the installed one again.
+procedure DeinitializeSetup;
+var
+  Code: Integer;
+begin
+  if WizardSilent and not Completed and
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN "{#TaskName}"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
+    RunHidden(ExpandConstant('{sys}\schtasks.exe'), '/Run /TN "{#TaskName}"');
 end;
 
 function TaskRegistered: Boolean;

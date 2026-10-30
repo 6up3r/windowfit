@@ -38,7 +38,13 @@ internal static class Program
             TrayContext tray;
             try
             {
+#if DEBUG
+                // A local release folder named in update-source.txt beside the exe, to try an update before a real release.
+                var sourceFile = Path.Combine(AppContext.BaseDirectory, "update-source.txt");
+                tray = new TrayContext(File.Exists(sourceFile) ? File.ReadAllText(sourceFile).Trim() : null);
+#else
                 tray = new TrayContext();
+#endif
             }
             catch (Exception e)
             {

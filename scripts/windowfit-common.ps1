@@ -2,6 +2,7 @@
 $TaskName = 'windowfit'
 $TaskPath = '\windowfit\'
 $ExeName = 'windowfit.exe'
+$LauncherName = 'windowfit-launcher.exe'
 $DefaultInstallDir = Join-Path $env:ProgramFiles 'windowfit'
 
 function Get-WindowFitTask {

@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windowfit-common.ps1')
 if (-not $InstallDir) { $InstallDir = $DefaultInstallDir }
 $exe = Join-Path $InstallDir $ExeName
+$launcher = Join-Path $InstallDir $LauncherName
 $failed = 0
 
 function Check([string]$Name, [bool]$Ok, [string]$Detail) {
@@ -57,13 +58,15 @@ function Test-TaskRunnable([string]$Sddl, [string]$Sid) {
 }
 
 Check 'installed exe' (Test-Path $exe) $exe
+Check 'installed launcher' (Test-Path $launcher) $launcher
 
 $task = Get-WindowFitTask
 if (-not $task) {
     Check 'logon task' $false "$TaskPath$TaskName not found (or not readable without elevation)"
 } else {
     Check 'task enabled' ($task.State -ne 'Disabled') "state $($task.State)"
-    Check 'task action' ($task.Actions[0].Execute -eq $exe) $task.Actions[0].Execute
+    # The launcher starts windowfit.exe without the user's environment.
+    Check 'task action' ($task.Actions[0].Execute -eq $launcher) $task.Actions[0].Execute
     Check 'task elevated' ($task.Principal.RunLevel -eq 'Highest') "run level $($task.Principal.RunLevel)"
     # "Only for me" names the user; "For all users" names the Users group.
     $runner = if ($task.Principal.GroupId) { $task.Principal.GroupId } else { $task.Principal.UserId }
@@ -87,6 +90,10 @@ if ($process.Count -eq 1) {
     $elevated = Get-TokenElevation $process[0].Id
     $detail = if ($null -eq $elevated) { "pid $($process[0].Id): token not readable (run elevated)" } else { "pid $($process[0].Id) elevated=$elevated" }
     Check 'process elevated' ($elevated -eq $true) $detail
+    # Started any other way, windowfit.exe has the user's environment, which can load code into it.
+    $launcherProcess = @(Get-Process -Name ($LauncherName -replace '\.exe$') -ErrorAction SilentlyContinue)
+    $parent = (Get-CimInstance Win32_Process -Filter "ProcessId = $($process[0].Id)").ParentProcessId
+    Check 'started by the launcher' ($launcherProcess.Count -eq 1 -and $parent -eq $launcherProcess[0].Id) "parent pid $parent, launcher pid(s) $($launcherProcess.Id -join ',')"
 }
 
 # FancyZones' own Win+arrow override would compete with windowfit's hook.

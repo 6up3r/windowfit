@@ -26,6 +26,9 @@ public sealed class ChordTracker
         set => _enabled = value;
     }
 
+    /// <summary>The current Win press, counted from 1; the actions of one press form one chord.</summary>
+    public int WinPress => _winPress;
+
     public KeyVerdict KeyDown(int virtualKey, Modifiers modifiers)
     {
         var repeat = virtualKey == _latestDown;

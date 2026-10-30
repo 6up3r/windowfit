@@ -1,6 +1,6 @@
 name: build
 
-# Every push and pull request builds, tests and packages the three setups; a vX.Y.Z tag also publishes them as a GitHub release.
+# Every push and pull request builds, tests and packages the three setups; a vX.Y.Z tag also drafts a GitHub release with them, which is published once its manifest is signed.
 on:
   push:
   pull_request:
@@ -40,13 +40,13 @@ jobs:
           foreach ($arch in 'x64', 'x86', 'arm64') {
               dotnet publish src\WindowFit\WindowFit.csproj -c Release -r "win-$arch" --self-contained true -p:Version=$version -o "out\$arch" --nologo
               if ($LASTEXITCODE -ne 0) { throw "dotnet publish win-$arch failed ($LASTEXITCODE)" }
-              & $iscc /Q "/DArch=$arch" "/DAppVersion=$version" "/DSourceExe=$PWD\out\$arch\windowfit.exe" installer\windowfit.iss
+              & installer\build-launcher.ps1 -Arch $arch -OutDir "out\launcher-$arch"
+              & $iscc /Q "/DArch=$arch" "/DAppVersion=$version" "/DSourceExe=$PWD\out\$arch\windowfit.exe" "/DLauncherExe=$PWD\out\launcher-$arch\windowfit-launcher.exe" installer\windowfit.iss
               if ($LASTEXITCODE -ne 0) { throw "ISCC $arch failed ($LASTEXITCODE)" }
-              $name = "windowfit-$version-setup-$arch.exe"
+              $name = "windowfit-setup-$arch.exe"
               $hash = (Get-FileHash "installer\Output\$name" -Algorithm SHA256).Hash.ToLowerInvariant()
               Set-Content -Path "installer\Output\$name.sha256" -Value "$hash  $name" -Encoding ascii
           }
-          "VERSION=$version" >> $env:GITHUB_ENV
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: setups
@@ -56,13 +56,18 @@ jobs:
       - name: Install, check and uninstall the x64 setup
         shell: powershell
         run: |
-          $setup = Join-Path $PWD "installer\Output\windowfit-$env:VERSION-setup-x64.exe"
+          $setup = Join-Path $PWD "installer\Output\windowfit-setup-x64.exe"
           # A \windowfit folder pre-created with full control for Authenticated Users, as a standard user could leave it.
           $scheduler = New-Object -ComObject Schedule.Service
           $scheduler.Connect()
           [void]$scheduler.GetFolder('\').CreateFolder('windowfit', 'D:(A;;FA;;;AU)')
           $p = Start-Process $setup '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SCOPE=all /LOG=setup.log' -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 40; throw "setup exited $($p.ExitCode)" }
+          # A silent setup must still run its postinstall entry: an update relies on it to start windowfit again.
+          $log = Get-Content setup.log
+          if (-not ($log -match '^.*Filename: C:\\Program Files\\windowfit\\windowfit\.exe$') -or -not ($log -match '^.*Parameters: --start$')) {
+              $log | Select-Object -Last 40; throw 'the silent setup did not run windowfit.exe --start'
+          }
           $writeBits = 0x40000000 -bor 0x10000000 -bor 0x2 -bor 0x4 -bor 0x10 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000
           $folder = $scheduler.GetFolder('\windowfit')
           foreach ($sd in @($folder.GetSecurityDescriptor(4), $folder.GetTask('windowfit').GetSecurityDescriptor(4))) {
@@ -75,7 +80,7 @@ jobs:
           $status = & powershell -NoProfile -ExecutionPolicy Bypass -File 'C:\Program Files\windowfit\status.ps1'
           $status
           # No one signs in on the runner, so only the install and the task are required.
-          if ($status -match '^FAIL (installed exe|logon task|task )') { throw 'installed state is wrong' }
+          if ($status -match '^FAIL (installed |logon task|task )') { throw 'installed state is wrong' }
           # status.ps1 exits 1 on the process checks, and the step's result is the last exit code.
           $global:LASTEXITCODE = 0
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\windowfit.lnk")) { throw 'Start menu entry missing' }
@@ -87,7 +92,7 @@ jobs:
           if (Test-Path 'C:\Program Files\windowfit') { $left += 'install folder' }
           if (Get-ScheduledTask -TaskPath '\windowfit\' -ErrorAction SilentlyContinue) { $left += 'task' }
           if (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\windowfit.lnk") { $left += 'Start menu entry' }
-          if (Get-Process windowfit -ErrorAction SilentlyContinue) { $left += 'process' }
+          if (Get-Process windowfit, windowfit-launcher -ErrorAction SilentlyContinue) { $left += 'process' }
           if ($left) { throw "left after uninstall: $($left -join ', ')" }
 
   release:
@@ -97,10 +102,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The job's token can write releases: it is not left in .git/config for the repo code built below.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: setups
           path: setups
+      - name: Release notes from CHANGELOG.md
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+)$') { throw "tag $env:TAG is not vX.Y.Z" }
+          dotnet run --project src\WindowFit.Signer -c Release -- notes --version $Matches[1] --out notes.md
+          if ($LASTEXITCODE -ne 0) { throw "CHANGELOG.md has no section for $env:TAG" }
       - name: Create the release
         shell: pwsh
         env:
@@ -110,5 +130,5 @@ jobs:
           if ($env:TAG -notmatch '^v\d+\.\d+\.\d+$') { throw "tag $env:TAG is not vX.Y.Z" }
           $files = @(Get-ChildItem setups -File | ForEach-Object FullName)
           if ($files.Count -ne 6) { throw "expected 6 release files, found $($files.Count)" }
-          gh release create $env:TAG @files --repo $env:GITHUB_REPOSITORY --title $env:TAG --generate-notes
+          gh release create $env:TAG @files --repo $env:GITHUB_REPOSITORY --title $env:TAG --notes-file notes.md --draft
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed ($LASTEXITCODE)" }

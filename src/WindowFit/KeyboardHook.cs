@@ -15,7 +15,7 @@ internal sealed class KeyboardHook : IDisposable
     // Tags the events this process injects, so the callback lets them through untouched.
     private static readonly UIntPtr InjectedTag = 0x57464954;
 
-    private readonly Action<WindowAction> _onAction;
+    private readonly Action<WindowAction, int> _onAction;
     private readonly LowLevelKeyboardProc _proc;
     private readonly ChordTracker _chords = new();
     private readonly ManualResetEventSlim _ready = new();
@@ -23,7 +23,8 @@ internal sealed class KeyboardHook : IDisposable
     private uint _threadId;
     private IntPtr _hook;
 
-    public KeyboardHook(Action<WindowAction> onAction)
+    /// <param name="onAction">Receives each action and its Win press, the chord it belongs to.</param>
+    public KeyboardHook(Action<WindowAction, int> onAction)
     {
         _onAction = onAction;
         _proc = Callback;
@@ -99,7 +100,7 @@ internal sealed class KeyboardHook : IDisposable
             if (verdict.Action is not null)
             {
                 SendMaskKey();
-                _onAction(verdict.Action);
+                _onAction(verdict.Action, _chords.WinPress);
             }
             if (verdict.Swallow)
             {

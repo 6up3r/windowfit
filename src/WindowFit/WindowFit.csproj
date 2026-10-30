@@ -4,6 +4,9 @@
     <ProjectReference Include="..\WindowFit.Core\WindowFit.Core.csproj" />
     <EmbeddedResource Include="Assets\windowfit.ico" LogicalName="windowfit.ico" />
     <EmbeddedResource Include="Assets\windowfit-paused.ico" LogicalName="windowfit-paused.ico" />
+    <EmbeddedResource Include="..\..\LICENSE" LogicalName="LICENSE" />
+    <EmbeddedResource Include="..\..\THIRD-PARTY-NOTICES.txt" LogicalName="THIRD-PARTY-NOTICES.txt" />
+    <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
   </ItemGroup>
 
   <PropertyGroup>
