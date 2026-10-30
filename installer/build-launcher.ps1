@@ -10,8 +10,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) { throw "vswhere not found at ${vswhere}: install Visual Studio Build Tools with the C++ tools" }
-$vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vs) { throw 'no Visual Studio with the MSVC x64/x86 tools' }
+# The x64 host tools build every target; arm64 also needs its own.
+$tools = @('Microsoft.VisualStudio.Component.VC.Tools.x86.x64')
+if ($Arch -eq 'arm64') { $tools += 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' }
+$vs = & $vswhere -latest -products * -requires $tools -property installationPath
+if (-not $vs) { throw "no Visual Studio with $($tools -join ' and ')" }
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvarsall.bat'
 # vcvarsall looks vswhere up on the Path.
 $env:Path = (Split-Path $vswhere) + ';' + $env:Path

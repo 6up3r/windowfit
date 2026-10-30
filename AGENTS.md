@@ -21,9 +21,9 @@ move elevated windows. An Inno Setup wizard per architecture installs it.
 | `src/WindowFit.Core/` | pure `net10.0` library, no Windows dependency: `Geometry` (tiles, gaps, centring), `Actions` (the sixteen actions, chord matching, window guards), `ChordTracker` (held arrows, repeats, quarter pairing, `Enabled` pause, `WinPress`), `WindowGroups` (tile conflicts, group formation and merging, the last placement of a Win press, activation with validation), `FrameCompensation` (visible frame to window rect), `Rect` (physical-pixel rectangle), `TrayText` (tray menu words in 13 languages), `LicenseNotices` (the License window's sections and copyright line), `Updates/` (`ReleaseManifest`: the signed `release.json` and its ECDSA check against `ReleaseKey.PublicKeys`; `ReleaseCheck`: tags, versions, the GitHub `releases/latest` answer, the offer, the download check; `Changelog`: `CHANGELOG.md`'s sections) |
 | `src/WindowFit/` | `windowfit.exe`: `Program` (single-instance mutex, `--start`; Debug builds also read a local release folder from `update-source.txt` beside the exe), `KeyboardHook` (WH_KEYBOARD_LL on its own thread, feeding `ChordTracker`), `WindowMover` (foreground window, eligibility, restore, `SetWindowPos`, read-back), `TrayContext` (tray icon and menu, Enabled and Groups toggles, move worker, rehook triggers, update checks and "What's new"), `WindowEvents` (WinEvent hook thread: foreground raises a group, destroy/hide/minimize-alone remove a member), `UserSettings` (the Groups choice and `SeenVersion` in `HKCU\Software\windowfit`, never written through a registry link), `Updater` (check, download, verification and start of a setup), `NotesWindow` (a release's signed notes with Install, or "What's new" from the embedded `CHANGELOG.md`), `LicenseWindow` (`LICENSE` and `THIRD-PARTY-NOTICES.txt`, embedded; addresses as plain text, since a link would start the browser elevated), `Native` (P/Invoke), `Log` (Debug builds only), `Assets/` (active and paused `.ico`, embedded; the active one is also the exe icon) |
 | `src/WindowFit.Signer/` | `windowfit-signer`, the release author's tool, never shipped: `keygen` (the passphrase-encrypted release key), `notes` (a version's section of `CHANGELOG.md`, for the CI), `sign` (`release.json` and `release.json.sig` for the downloaded setups) |
-| `src/WindowFit.Launcher/launcher.c` | `windowfit-launcher.exe`, the task's action: starts `windowfit.exe` beside it with only the system's environment names (`SystemRoot`, `windir` and `Path` built from the Windows folder, not inherited), waits and returns its exit code |
+| `src/WindowFit.Launcher/launcher.c` | `windowfit-launcher.exe`, the task's action: starts `windowfit.exe` beside it with only the system's environment names (`SystemRoot`, `windir` and `Path` built from the Windows folder, not inherited), waits and returns its exit code; its own failures return an HRESULT (`0x8007xxxx`), which "Last Run Result" spells out |
 | `tests/WindowFit.Tests/` | xUnit tests of `WindowFit.Core`; they open no window |
-| `installer/build-launcher.ps1` | compiles `launcher.c` for one architecture with MSVC (`vswhere`, `vcvarsall`; `/MT`, `/W4 /WX`, CFG) |
+| `installer/build-launcher.ps1` | compiles `launcher.c` for one architecture with MSVC (`vswhere`, requiring the ARM64 tools too for arm64; `vcvarsall`; `/MT`, `/W4 /WX`, CFG) |
 | `installer/windowfit.iss` | Inno Setup script, one per architecture through `/DArch=x64\|x86\|arm64 /DAppVersion=X.Y.Z /DSourceExe=<exe> /DLauncherExe=<launcher>`; output `installer/Output/windowfit-setup-<arch>.exe`, unversioned so `releases/latest/download/` links stay valid |
 | `installer/CustomMessages.iss` | the setup's own texts in the 13 languages (UTF-8 with BOM) |
 | `installer/Languages/ChineseSimplified.isl` | Inno Setup's unofficial Chinese (Simplified) translation, not bundled with Inno Setup; copied unchanged from `jrsoftware/issrc` at `is-6_7_3` |
@@ -160,8 +160,8 @@ a build whose version is `0.0.0` never checks. A check reads
 `api.github.com/repos/6up3r/windowfit/releases/latest`; a newer tag counts only with its
 `release.json` signed by a key of `ReleaseKey.PublicKeys` (ECDSA P-256, SHA-256, DER; a list, so
 a new key can be added before an old one is retired), of the tag's version, with a setup for
-`RuntimeInformation.OSArchitecture`. An automatic check that fails says nothing and waits for the
-next one. A found release shows a balloon once per version and run, and the menu item
+`RuntimeInformation.OSArchitecture` (a newer one without it is an error). An automatic check that fails says nothing and waits for the
+next one; a click on **Check for updates** during it gets its answer. A found release shows a balloon once per version and run, and the menu item
 **Install update X.Y.Z...**, which opens the manifest's notes with Install and Later.
 
 Install runs only in an elevated process started from `%ProgramFiles%\windowfit\`: the setup is
@@ -170,9 +170,9 @@ held open without write or delete sharing while its size and SHA-256 are checked
 started, and started with `/SILENT /NORESTART` and `TMP`/`TEMP` set to `updates\temp\`, so even
 the files Inno extracts stay out of the user's reach, and with only the system's environment names
 (`ReleaseCheck.SetupEnvironment`: no profiler, startup hook or module path of the user's
-environment reaches the setup or the PowerShell it runs); then windowfit exits. The setup keeps the
+environment reaches the setup or the PowerShell it runs, and `SystemRoot`, `windir` and `Path` are the launcher's, built from the Windows folder); then windowfit exits. The setup keeps the
 previous scope and its postinstall entry starts the task again; a silent setup that ends without
-installing starts the task too. An unelevated windowfit opens the release page instead. Each start
+installing starts the task too. An unelevated windowfit opens the release page instead, its address built from the version (`ReleaseCheck.Page`), never taken from GitHub's answer. Each start
 removes `updates\`; if the setup still holds a file in it, what is left goes at the next start. The
 uninstaller removes it too.
 Errors shown to the user come from `ReleaseCheck.Reason`, never from what a server sent. With **For all users**, an update ends windowfit in every

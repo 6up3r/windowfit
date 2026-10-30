@@ -1,6 +1,7 @@
 /*
  * windowfit-launcher.exe: the logon task's action. It starts windowfit.exe from its own folder with only the system's
- * environment names, waits for it and returns its exit code, so Task Scheduler's restart policy still sees windowfit.
+ * environment names, waits for it and returns its exit code, so Task Scheduler's restart policy still sees windowfit;
+ * its own failures return an HRESULT, which "Last Run Result" spells out and windowfit never exits with.
  * The task runs elevated with the user's environment, which HKCU\Environment lets any unelevated process of that user
  * write; a .NET process reads CORECLR_*, DOTNET_* and COR_* from it (profilers, startup hooks) and would load their
  * code as administrator. This launcher has no runtime that reads them and passes none of them on.
@@ -97,10 +98,15 @@ static wchar_t *EnvironmentBlock(void)
     return block;
 }
 
+static int Failure(DWORD error)
+{
+    return (int)HRESULT_FROM_WIN32(error ? error : ERROR_GEN_FAILURE);
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, int show)
 {
     wchar_t dir[MAX_PATH], exe[MAX_PATH];
-    DWORD n = GetModuleFileNameW(NULL, dir, MAX_PATH), code = 1;
+    DWORD n = GetModuleFileNameW(NULL, dir, MAX_PATH), code;
     wchar_t *slash, *block;
     STARTUPINFOW startup = {sizeof startup};
     PROCESS_INFORMATION process;
@@ -112,27 +118,30 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
     (void)commandLine;
     (void)show;
     if (n == 0 || n >= MAX_PATH || (slash = wcsrchr(dir, L'\\')) == NULL)
-        return 1;
+        return Failure(GetLastError());
     *slash = L'\0';
-    if (swprintf(exe, MAX_PATH, L"%ls\\windowfit.exe", dir) < 0 || (block = EnvironmentBlock()) == NULL)
-        return 1;
+    if (swprintf(exe, MAX_PATH, L"%ls\\windowfit.exe", dir) < 0)
+        return Failure(ERROR_FILENAME_EXCED_RANGE);
+    if ((block = EnvironmentBlock()) == NULL)
+        return Failure(ERROR_BAD_ENVIRONMENT);
     /* windowfit runs in a job that ends it when this launcher ends (the task's End), while the processes it starts,
      * an update's setup among them, break away and outlive both. */
     job = CreateJobObjectW(NULL, NULL);
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
     if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof limits))
-        return (int)GetLastError();
+        return Failure(GetLastError());
     if (!CreateProcessW(exe, NULL, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED, block, dir, &startup,
                         &process))
-        return (int)GetLastError();
+        return Failure(GetLastError());
     if (!AssignProcessToJobObject(job, process.hProcess)) {
-        code = GetLastError();
+        code = (DWORD)Failure(GetLastError());
         TerminateProcess(process.hProcess, code);
         return (int)code;
     }
     ResumeThread(process.hThread);
     WaitForSingleObject(process.hProcess, INFINITE);
-    GetExitCodeProcess(process.hProcess, &code);
+    if (!GetExitCodeProcess(process.hProcess, &code))
+        code = (DWORD)Failure(GetLastError());
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
     CloseHandle(job);

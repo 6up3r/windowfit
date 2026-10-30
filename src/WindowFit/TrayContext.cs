@@ -40,6 +40,7 @@ internal sealed class TrayContext : ApplicationContext
     private UpdateOffer? _offer;
     private Version? _announced;
     private bool _checking;
+    private bool _answer;
     private bool _installing;
 
     public TrayContext(string? updateSource = null)
@@ -82,6 +83,8 @@ internal sealed class TrayContext : ApplicationContext
 
     private async Task CheckForUpdate(bool manual)
     {
+        // A click during an automatic check gets that check's answer.
+        _answer |= manual;
         if (_checking)
         {
             return;
@@ -94,12 +97,12 @@ internal sealed class TrayContext : ApplicationContext
             if (offer is not null)
             {
                 Offered(offer);
-                if (manual)
+                if (_answer)
                 {
                     ShowOffer();
                 }
             }
-            else if (manual)
+            else if (_answer)
             {
                 MessageBox.Show(_text.UpToDate, "windowfit", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -108,7 +111,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             // An automatic check fails silently and runs again at the next tick.
             Log.Write($"update check failed: {e}");
-            if (manual)
+            if (_answer)
             {
                 MessageBox.Show(string.Format(_text.CheckFailed, ReleaseCheck.Reason(e)), "windowfit", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -116,6 +119,7 @@ internal sealed class TrayContext : ApplicationContext
         finally
         {
             _checking = false;
+            _answer = false;
         }
     }
 

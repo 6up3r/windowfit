@@ -50,11 +50,10 @@ public class ReleaseCheckTests
     }
 
     [Fact]
-    public void ParseLatest_ReadsTagPageAndAssets()
+    public void ParseLatest_ReadsTagAndAssets()
     {
         var latest = Parse();
         Assert.Equal(new Version(1, 0, 4), latest.Version);
-        Assert.Equal("https://github.com/6up3r/windowfit/releases/tag/v1.0.4", latest.Page);
         Assert.Equal("https://example.test/x64.exe", latest.AssetUrls["windowfit-setup-x64.exe"]);
     }
 
@@ -96,12 +95,21 @@ public class ReleaseCheckTests
         Assert.Null(ReleaseCheck.Offer(Parse(), new ReleaseManifest("1.0.4", "", [X64]), new Version(major, minor, build, 0), "x64"));
 
     [Fact]
-    public void Offer_NoAssetForArch_IsNull() =>
-        Assert.Null(ReleaseCheck.Offer(Parse(), new ReleaseManifest("1.0.4", "", [X64]), new Version(1, 0, 3), "arm64"));
+    public void Offer_PageComesFromTheVersion()
+    {
+        var planted = Parse(Latest.Replace("https://github.com/6up3r/windowfit/releases/tag/v1.0.4", @"file:///C:/Users/u/planted.exe"));
+        var offer = ReleaseCheck.Offer(planted, new ReleaseManifest("1.0.4", "", [X64]), new Version(1, 0, 3), "x64");
+        Assert.Equal("https://github.com/6up3r/windowfit/releases/tag/v1.0.4", offer?.Page);
+    }
 
     [Fact]
-    public void Offer_AssetWithoutUrl_IsNull() =>
-        Assert.Null(ReleaseCheck.Offer(Parse(), new ReleaseManifest("1.0.4", "", [X64 with { Name = "other.exe" }]), new Version(1, 0, 3), "x64"));
+    public void Offer_NoAssetForArch_Throws() =>
+        Assert.Throws<InvalidDataException>(() => ReleaseCheck.Offer(Parse(), new ReleaseManifest("1.0.4", "", [X64]), new Version(1, 0, 3), "arm64"));
+
+    [Fact]
+    public void Offer_AssetWithoutUrl_Throws() =>
+        Assert.Throws<InvalidDataException>(() =>
+            ReleaseCheck.Offer(Parse(), new ReleaseManifest("1.0.4", "", [X64 with { Name = "other.exe" }]), new Version(1, 0, 3), "x64"));
 
     [Fact]
     public void Offer_ManifestOfAnotherVersion_Throws() =>
@@ -157,7 +165,8 @@ public class ReleaseCheckTests
     {
         var inherited = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["SystemRoot"] = @"C:\Windows",
+            ["SystemRoot"] = @"C:\Users\u\planted",
+            ["windir"] = @"C:\Users\u\planted",
             ["USERPROFILE"] = @"C:\Users\u",
             ["Path"] = @"C:\Users\u\bin;C:\Windows\system32",
             ["TEMP"] = @"C:\Users\u\AppData\Local\Temp",
@@ -170,10 +179,11 @@ public class ReleaseCheckTests
             ["ComSpec"] = @"C:\Users\u\cmd.exe",
             ["PATHEXT"] = ".PLANTED",
         };
-        var env = ReleaseCheck.SetupEnvironment(inherited, @"C:\Program Files\windowfit\updates\temp", @"C:\Windows\system32;C:\Windows");
+        var env = ReleaseCheck.SetupEnvironment(inherited, @"C:\Program Files\windowfit\updates\temp", @"C:\Windows");
         Assert.Equal(@"C:\Windows", env["SystemRoot"]);
+        Assert.Equal(@"C:\Windows", env["windir"]);
         Assert.Equal(@"C:\Users\u", env["USERPROFILE"]);
-        Assert.Equal(@"C:\Windows\system32;C:\Windows", env["Path"]);
+        Assert.Equal(@"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\", env["Path"]);
         Assert.Equal(@"C:\Program Files\windowfit\updates\temp", env["TEMP"]);
         Assert.Equal(@"C:\Program Files\windowfit\updates\temp", env["TMP"]);
         Assert.All(new[] { "COR_ENABLE_PROFILING", "COR_PROFILER_PATH", "CORECLR_ENABLE_PROFILING", "DOTNET_STARTUP_HOOKS", "PSModulePath", "__PSLockdownPolicy", "ComSpec", "PATHEXT" },

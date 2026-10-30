@@ -4,6 +4,16 @@ All notable changes to windowfit are listed here, newest first. The format follo
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Check for updates** clicked while an automatic check runs now shows that check's answer.
+- A newer release without a setup for your system's architecture is reported as a failed check, not as "up to date".
+- Without administrator rights, windowfit opens the release page at an address it builds from the version.
+- The setup of an update gets the system's own `Path`, never folders that other programs add to the machine's `Path`.
+- When `windowfit-launcher.exe` itself fails, the task's "Last Run Result" names the Windows error.
+
 ## [1.0.3] - 2026-10-30
 
 ### Added

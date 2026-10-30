@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace WindowFit.Core.Updates;
 
-/// <summary>The latest GitHub release as <c>releases/latest</c> describes it: its version, its page and its files'
-/// download URLs by name.</summary>
-public sealed record LatestRelease(Version Version, string Page, IReadOnlyDictionary<string, string> AssetUrls);
+/// <summary>The latest GitHub release as <c>releases/latest</c> describes it: its version and its files' download URLs
+/// by name.</summary>
+public sealed record LatestRelease(Version Version, IReadOnlyDictionary<string, string> AssetUrls);
 
 /// <summary>A newer release this system can install: its version, its signed notes, its page and the setup.</summary>
 public sealed record UpdateOffer(Version Version, string Notes, string Page, ReleaseAsset Asset, string Url);
@@ -50,7 +50,7 @@ public static partial class ReleaseCheck
             var root = JsonDocument.Parse(json).RootElement;
             var urls = root.GetProperty("assets").EnumerateArray().ToDictionary(
                 a => a.GetProperty("name").GetString()!, a => a.GetProperty("browser_download_url").GetString()!);
-            return new LatestRelease(ParseTag(root.GetProperty("tag_name").GetString()!), root.GetProperty("html_url").GetString()!, urls);
+            return new LatestRelease(ParseTag(root.GetProperty("tag_name").GetString()!), urls);
         }
         catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException or ArgumentException)
         {
@@ -66,8 +66,13 @@ public static partial class ReleaseCheck
             : throw new InvalidDataException(
                 $"release {latest.Version} has no {ReleaseManifest.FileName} and {ReleaseManifest.SignatureName}");
 
-    /// <summary>The offer when <paramref name="latest"/> is newer than <paramref name="current"/> and carries a setup
-    /// for <paramref name="arch"/>; null otherwise. A manifest of another version than the tag is an error.</summary>
+    /// <summary>The release page of <paramref name="version"/>, built here: the page GitHub's answer names is not
+    /// signed, and the unelevated windowfit hands it to the shell.</summary>
+    public static string Page(Version version) => $"https://github.com/6up3r/windowfit/releases/tag/v{Normalize(version).ToString(3)}";
+
+    /// <summary>The offer when <paramref name="latest"/> is newer than <paramref name="current"/>; null otherwise. A
+    /// manifest of another version than the tag, or a release without a setup for <paramref name="arch"/>, is an
+    /// error.</summary>
     public static UpdateOffer? Offer(LatestRelease latest, ReleaseManifest manifest, Version current, string arch)
     {
         if (latest.Version <= Normalize(current))
@@ -80,8 +85,8 @@ public static partial class ReleaseCheck
         }
         var asset = manifest.AssetFor(arch);
         return asset is not null && latest.AssetUrls.TryGetValue(asset.Name, out var url)
-            ? new UpdateOffer(latest.Version, manifest.Notes, latest.Page, asset, url)
-            : null;
+            ? new UpdateOffer(latest.Version, manifest.Notes, Page(latest.Version), asset, url)
+            : throw new InvalidDataException($"release {latest.Version} has no setup for {arch}");
     }
 
     /// <summary>Throws an <see cref="InvalidDataException"/> unless <paramref name="file"/> has the size and SHA-256
@@ -114,16 +119,18 @@ public static partial class ReleaseCheck
     // interpreter and the like stay behind.
     private static readonly string[] SetupNames =
     [
-        "SystemRoot", "windir", "SystemDrive", "OS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER",
+        "SystemDrive", "OS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER",
         "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "NUMBER_OF_PROCESSORS", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
         "CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432", "ProgramData", "ALLUSERSPROFILE", "PUBLIC",
         "COMPUTERNAME", "USERNAME", "USERDOMAIN", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH",
     ];
 
-    /// <summary>The environment an update's setup starts with: the system names of <paramref name="inherited"/>, the
-    /// machine's Path, and TMP and TEMP at <paramref name="temp"/>. The rest of the user's environment, writable
-    /// without elevation, stays out of the elevated setup and the PowerShell it runs.</summary>
-    public static Dictionary<string, string> SetupEnvironment(IReadOnlyDictionary<string, string?> inherited, string temp, string? machinePath)
+    /// <summary>The environment an update's setup starts with: the system names of <paramref name="inherited"/>;
+    /// SystemRoot, windir and the Path windowfit-launcher.exe builds, from <paramref name="windows"/>; and TMP and TEMP
+    /// at <paramref name="temp"/>. The rest of the user's environment, writable without elevation, and the machine's
+    /// Path, which installers extend with folders users can write, stay out of the elevated setup and the PowerShell
+    /// it runs.</summary>
+    public static Dictionary<string, string> SetupEnvironment(IReadOnlyDictionary<string, string?> inherited, string temp, string windows)
     {
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in SetupNames)
@@ -133,10 +140,9 @@ public static partial class ReleaseCheck
                 env[name] = value;
             }
         }
-        if (machinePath is not null)
-        {
-            env["Path"] = machinePath;
-        }
+        env["SystemRoot"] = windows;
+        env["windir"] = windows;
+        env["Path"] = $@"{windows}\System32;{windows};{windows}\System32\Wbem;{windows}\System32\WindowsPowerShell\v1.0\";
         env["TMP"] = temp;
         env["TEMP"] = temp;
         return env;

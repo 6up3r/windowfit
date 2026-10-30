@@ -53,7 +53,7 @@ internal sealed class Updater : IDisposable
             var files = Directory.EnumerateFiles(dir).ToDictionary(f => Path.GetFileName(f), f => f, StringComparer.Ordinal);
             var local = ReleaseManifest.Verify(File.ReadAllBytes(files[ReleaseManifest.FileName]),
                 File.ReadAllBytes(files[ReleaseManifest.SignatureName]), ReleaseKey.PublicKeys);
-            latest = new LatestRelease(ReleaseCheck.ParseTag("v" + local.Version), dir, files);
+            latest = new LatestRelease(ReleaseCheck.ParseTag("v" + local.Version), files);
         }
         else
         {
@@ -116,7 +116,7 @@ internal sealed class Updater : IDisposable
         var start = new ProcessStartInfo(path, "/SILENT /NORESTART") { UseShellExecute = false };
         var inherited = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
             .ToDictionary(e => (string)e.Key, e => (string?)e.Value, StringComparer.OrdinalIgnoreCase);
-        var environment = ReleaseCheck.SetupEnvironment(inherited, temp, Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine));
+        var environment = ReleaseCheck.SetupEnvironment(inherited, temp, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
         start.Environment.Clear();
         foreach (var (name, value) in environment)
         {
